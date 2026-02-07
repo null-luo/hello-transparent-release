@@ -1,0 +1,68 @@
+# 使用 Bazel + 自定义 Docker 镜像进行可重复构建并生成 Provenance。
+# 先构建项目 Dockerfile 定义的 builder 镜像并推送到 ghcr.io，再用该镜像跑 SLSA builder。
+# 与 provenance.yaml（Maven 路径）二选一或并存；本 workflow 产物为 out/HelloTransparentRelease。
+
+name: Generate Provenance (Bazel)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-builder:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.digest.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push builder image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/hello-transparent-release-builder:latest
+            ghcr.io/${{ github.repository_owner }}/hello-transparent-release-builder:${{ github.sha }}
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/hello-transparent-release-builder,push-by-digest=true
+
+      - name: Set digest output
+        id: digest
+        run: |
+          d="${{ steps.build.outputs.digest }}"
+          if [[ -z "$d" ]]; then echo "::error::No digest from build" && exit 1; fi
+          [[ "$d" == sha256:* ]] || d="sha256:$d"
+          echo "digest=$d" >> "$GITHUB_OUTPUT"
+
+  generate_provenance:
+    needs: build-builder
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+      packages: read  # 拉取上一步推送到 ghcr.io 的 builder 镜像
+    uses: slsa-framework/slsa-github-generator/.github/workflows/builder_container-based_slsa3.yml@v2.1.0
+    with:
+      builder-image: "ghcr.io/${{ github.repository_owner }}/hello-transparent-release-builder"
+      builder-digest: ${{ needs.build-builder.outputs.digest }}
+      config-path: "buildconfigs/hello_transparent_release_slsa.toml"
+      provenance-name: "hello_transparent_release_bazel.intoto"
+      compile-builder: true
