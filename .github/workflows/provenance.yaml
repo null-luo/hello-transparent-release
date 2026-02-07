@@ -1,11 +1,11 @@
 name: Generate Provenance
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:  # 允许在 GitHub 网页上点击 "Run workflow" 手动触发
+  # push:
+  #   branches: [main]
+  # pull_request:
+  #   branches: [main]
+  workflow_dispatch:  # 仅手动触发：Actions 页选择该 workflow 后点 "Run workflow"
 
 jobs:
   generate_provenance:
