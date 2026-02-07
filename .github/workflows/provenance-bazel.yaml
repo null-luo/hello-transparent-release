@@ -9,10 +9,17 @@ on:
   #   branches: [main]
   # pull_request:
   #   branches: [main]
-  workflow_dispatch:  # 仅手动触发：Actions 页选择该 workflow 后点 "Run workflow"
+  workflow_dispatch:
+    inputs:
+      # 可选：若填写则跳过构建 builder，直接使用该 digest，用于验证可重复构建（两次 run 用同一 digest，产物哈希应一致）
+      builder_digest:
+        description: 'Optional: pin builder image digest (e.g. from previous run) for reproducible build'
+        required: false
+        type: string
 
 jobs:
   build-builder:
+    if: ${{ !inputs.builder_digest }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -54,8 +61,21 @@ jobs:
           [[ "$d" == sha256:* ]] || d="sha256:$d"
           echo "digest=$d" >> "$GITHUB_OUTPUT"
 
+  use-pinned-builder:
+    if: ${{ inputs.builder_digest != '' }}
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.set.outputs.digest }}
+    steps:
+      - id: set
+        run: |
+          d="${{ inputs.builder_digest }}"
+          [[ "$d" == sha256:* ]] || d="sha256:$d"
+          echo "digest=$d" >> "$GITHUB_OUTPUT"
+
   generate_provenance:
-    needs: build-builder
+    needs: [build-builder, use-pinned-builder]
+    if: always() && (needs.build-builder.result == 'success' || needs.use-pinned-builder.result == 'success')
     permissions:
       actions: read
       id-token: write
@@ -64,7 +84,7 @@ jobs:
     uses: slsa-framework/slsa-github-generator/.github/workflows/builder_container-based_slsa3.yml@v2.1.0
     with:
       builder-image: "ghcr.io/${{ github.repository_owner }}/hello-transparent-release-builder"
-      builder-digest: ${{ needs.build-builder.outputs.digest }}
+      builder-digest: ${{ needs.build-builder.outputs.digest || needs.use-pinned-builder.outputs.digest }}
       config-path: "buildconfigs/hello_transparent_release_slsa.toml"
       provenance-name: "hello_transparent_release_bazel.intoto"
       compile-builder: true
