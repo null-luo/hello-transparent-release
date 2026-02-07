@@ -43,12 +43,13 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/hello-transparent-release-builder:latest
             ghcr.io/${{ github.repository_owner }}/hello-transparent-release-builder:${{ github.sha }}
 
-      # 从已推送的 tag 查询 digest（与 push-by-digest 同用 tags 会报错，故分开）
+      # 从已推送的 tag 查询 digest（buildx 版本不同模板不同，用 --raw + jq 更稳）
       - name: Set digest output
         id: digest
         run: |
           IMAGE="ghcr.io/${{ github.repository_owner }}/hello-transparent-release-builder:latest"
-          d=$(docker buildx imagetools inspect "$IMAGE" --format '{{.Descriptor.digest}}')
+          raw=$(docker buildx imagetools inspect "$IMAGE" --raw)
+          d=$(echo "$raw" | jq -r '.digest // .manifests[0].digest // .config.digest // empty')
           if [[ -z "$d" ]]; then echo "::error::Failed to get digest for $IMAGE" && exit 1; fi
           [[ "$d" == sha256:* ]] || d="sha256:$d"
           echo "digest=$d" >> "$GITHUB_OUTPUT"
